@@ -36,7 +36,8 @@
 #include "timer_mcu.h"
 #include "uart_mcu.h"
 #include "stdlib.h"
-
+#include "neopixel_stripe.h"
+#include "buzzer.h"
 /*==================[macros and definitions]=================================*/
 #define TIEMPO_REFRESCO_PANTALLA 50000 // VER TIEMPOS
 #define TIEMPO_MEDICION 1000 // 1 ms de refresco 
@@ -63,9 +64,11 @@ void funcTimerControlador(){
 }
 
 static void manejoDeLEDsyBuzzers(){
-    int sensor = rand() % (CANTIDADSENSORES+1); //Obtengo el sensor a encender
-    NeoPixelSetPixel(uint16_t pixel, neopixel_color_t color); // prende sensor en un color
-
+    int sensor = rand() % (CANTIDADSENSORES); //Obtengo el sensor a encender
+    for(int i = sensor*4; i<(sensor*4+4); i++){
+        NeoPixelSetPixel(i, NEOPIXEL_COLOR_RED); // prende sensor en un color
+    }
+    BuzzerOn(); // prendo el buzzer
 }
 
 
@@ -74,9 +77,8 @@ static void cambioEstado_IR(){
 }
 
 
-
 static void medir(){
-
+// ver donde que se cambia medida acertiva
 }
 
 static void controlar(void *pvParameter){
@@ -88,6 +90,8 @@ static void controlar(void *pvParameter){
         if (IR == true){
             medir();
             cambioEstado_IR();
+            NeoPixelAllOff();    //Apago los LEDs
+            BuzzerOff(); //Apago el BUZZER
         }
     }
 }
@@ -101,7 +105,11 @@ static void manejarInterfaz(void *pvParameter){
 /*==================[external functions definition]==========================*/
 void app_main(void){
 
-    NeoPixelInit(gpio_t pin, uint16_t len, neopixel_color_t *color_array);
+    // Inicializacion de los perifericos
+    //NeoPixelInit(GPIO_IR, CANTIDADSENSORES*4, neopixel_color_t *color_array); //ver el color array como funciona
+    BuzzerInit(GPIO_IR);
+    BuzzerSetFrec(NOTE_C3); // se setea el tono con el que suena el buzzer
+
 	// Inicialización de timers 
     timer_config_t timer_controlador = {
         .timer = TIMER_A,
