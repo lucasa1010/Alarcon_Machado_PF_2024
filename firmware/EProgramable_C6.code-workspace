@@ -35,6 +35,9 @@
         },
         {
             "path": "examples/proyecto_final"
+        },
+        {
+            "path": "examples/proyecto_final2.0"
         }
     ],
     "settings": {

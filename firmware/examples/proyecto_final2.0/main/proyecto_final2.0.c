@@ -1,30 +1,32 @@
-/*! @mainpage Template
+ /*! @mainpage Ejemplo Bluetooth - FFT
  *
  * @section genDesc General Description
  *
- * This section describes how the program works.
- *
- * <a href="https://drive.google.com/...">Operation Example</a>
- *
- * @section hardConn Hardware Connection
- *
- * |    Peripheral  |   ESP32   	|
- * |:--------------:|:--------------|
- * | 	PIN_X	 	| 	GPIO_X		|
- *
+ * Este proyecto ejemplifica el uso del módulo de comunicación 
+ * Bluetooth Low Energy (BLE), junto con el de cálculo de la FFT 
+ * de una señal.
+ * Permite graficar en una aplicación móvil la FFT de una señal. 
  *
  * @section changelog Changelog
  *
  * |   Date	    | Description                                    |
  * |:----------:|:-----------------------------------------------|
- * | 12/09/2023 | Document creation		                         |
+ * | 02/04/2024 | Document creation		                         |
  *
- * @author Lucas Alarcon (lucasalarcon872@gmail.com)
- * @author Joaquin Machado (joaquin.machado@ingenieria.uner.edu.ar)
+ * @author Albano Peñalva (albano.penalva@uner.edu.ar)
  *
  */
 
 /*==================[inclusions]=============================================*/
+#include <stdio.h>
+#include <stdint.h>
+#include <string.h>
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "led.h"
+#include "neopixel_stripe.h"
+#include "ble_mcu.h"
+#include "delay_mcu.h"
 #include <stdio.h>
 #include <stdint.h>
 #include "freertos/FreeRTOS.h"
@@ -45,24 +47,26 @@
 #include "uart_mcu.h"
 /*==================[macros and definitions]=================================*/
 #define TIEMPO_REFRESCO_PANTALLA 1 // VER TIEMPOS
-#define TIEMPO_MEDICION 1000 // 1 ms de refresco 
+#define TIEMPO_MEDICION 1000 // antes estaba en 100000
 #define GPIO_LEDS GPIO_9
 #define GPIO_IR GPIO_22
 TaskHandle_t interfaz_task_handle = NULL;
 TaskHandle_t controlador_task_handle = NULL;
 bool IR = false; //analiza si se dispara el evento
 uint16_t voltaje = 0; //voltaje asociado al sensor que se midio
-#define SENSORR 0.78   //estan por orden de linea es decir el rojo es el primero y asi
-#define SENSORA 2.35
-#define SENSORV 2.75
-#define SENSORN 1.36 // tension asociada a cada sensor en particular
+#define SENSORR  785  // 0.78 V
+#define SENSORN  2353 // 2.35
+#define SENSORV  2753 // 2.75
+#define SENSORA  1360 // 1.36
 #define CANTIDADSENSORES 4
 bool medidaAcertada = true; 
 neopixel_color_t cantidadLeds [CANTIDADSENSORES*4];
-u_int16_t tiempoInicio = 0;
+clock_t tiempoInicio = 0;
+clock_t tiempoFinal = 0;
 u_int16_t tiempoMedido = 0;
-int sensor = 0;
+int sensor = -1;
 u_int16_t sensorPrendido = 0;
+int sensor_anterior = -1;
 /*==================[internal data definition]===============================*/
 
 /*==================[internal functions declaration]=========================*/
@@ -75,8 +79,11 @@ void funcTimerControlador(){
 }
 
 static void manejoDeLEDsyBuzzers(){
-    ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-    sensor = rand() % (CANTIDADSENSORES); //Obtengo el sensor a encender
+    
+    while (sensor == sensor_anterior){
+        sensor = rand() % (CANTIDADSENSORES); //Obtengo el sensor a encender
+    }
+
     for(int i = sensor*4; i<(sensor*4+4); i++){
         if(sensor==0){
             NeoPixelSetPixel(i, NEOPIXEL_COLOR_RED); // prende sensor en un color
@@ -91,21 +98,24 @@ static void manejoDeLEDsyBuzzers(){
             NeoPixelSetPixel(i, NEOPIXEL_COLOR_ORANGE);
         }
     }
+    sensor_anterior = sensor;
     //BuzzerOn(); // prendo el buzzer
 }
 
 
 static void cambioEstado_IR(){
     IR =! IR;
+    LedOff(LED_1);
 }
 
 void obtenerSensorPrendido(){    //Asigna la tension del bloque activado a la variable sensorPrendido
     switch (sensor){
-    case 0: sensorPrendido = SENSORR; break;
-    case 1: sensorPrendido = SENSORA; break;
-    case 2: sensorPrendido = SENSORV; break;
-    case 3: sensorPrendido = SENSORN; break;
+        case 0: sensorPrendido = SENSORR; break;
+        case 1: sensorPrendido = SENSORA; break;
+        case 2: sensorPrendido = SENSORV; break;
+        case 3: sensorPrendido = SENSORN; break;
     }
+    printf("Tension del sensor prendido: %d\r\n",sensorPrendido);
 }
 
 void apagarLeds(){
@@ -115,8 +125,7 @@ void apagarLeds(){
 }
 
 static void medir(){
-    tiempoMedido = ( ((u_int16_t) clock()) / CLOCKS_PER_SEC) - tiempoInicio; //calcula el tiempo
-// ver donde que se cambia medida acertiva
+    tiempoMedido = ((u_int16_t)(tiempoInicio - tiempoFinal)) / CLOCKS_PER_SEC; //calcula el tiempo
 }
 
 static void controlar(void *pvParameter){
@@ -125,18 +134,21 @@ static void controlar(void *pvParameter){
         if(medidaAcertada == true){ // Si selecciona el sensor correcto
             manejoDeLEDsyBuzzers();
             obtenerSensorPrendido();
-            tiempoInicio = (u_int16_t) clock(); //Incia el tiempo 
-            tiempoInicio = tiempoInicio / CLOCKS_PER_SEC;  //Se pasa a segundos
+            medidaAcertada = false;
+            tiempoInicio = clock(); //Incia el tiempo 
         } 
         if (IR == true){ //Asociarlo a niveles de tension
-            AnalogInputReadSingle(GPIO_IR, &voltaje);   //se obtiene el voltaje en el sensor 
-            printf("%d\n", voltaje);
-            if(voltaje == sensorPrendido){
+            AnalogInputReadSingle(CH1, &voltaje);   //se obtiene el voltaje en el sensor 
+            printf("%d\n",voltaje);
+            if(voltaje > (sensorPrendido-100) && voltaje < (sensorPrendido+100)){
+                tiempoFinal = clock(); //obtiene el tiempo final
                 medir(); //obtiene la diferencia de tiempos
-                cambioEstado_IR(); //cambia el estado del infrarojo
+                //cambioEstado_IR(); //cambia el estado del infrarojo
+                LedOn(LED_1);
                 apagarLeds();
                 //BuzzerOff(); //Apago el BUZZER
                 medidaAcertada = true;
+                printf("Tiempo medido: %d\r\n", tiempoMedido);
             }
             cambioEstado_IR(); //cambia el estado del infrarojo
         }
@@ -154,58 +166,55 @@ void app_main(void){
     
     // Inicializacion de los perifericos
     NeoPixelInit(GPIO_LEDS, CANTIDADSENSORES*4, cantidadLeds);
+    GPIOActivInt(GPIO_IR, *cambioEstado_IR, true, NULL); //lanza el evento de que el IR midio
     //BuzzerInit(GPIO_IR);
     //BuzzerSetFrec(NOTE_C3); // se setea el tono con el que suena el buzzer
-	// analog_input_config_t conversorAD = {
-    //     .input = CH1,
-    //     .mode = ADC_SINGLE,
-    // };
-    // AnalogInputInit(&conversorAD);
-    // AnalogOutputInit();
-	// Inicialización de timers 
-    // timer_config_t timer_controlador = {
-    //     .timer = TIMER_A,
-    //     .period = TIEMPO_MEDICION,
-    //     .func_p = funcTimerControlador,
-    //     .param_p = NULL
-    // };
-    // TimerInit(&timer_controlador);
 
-    // timer_config_t timer_interfaz = {
-    //     .timer = TIMER_B,
-    //     .period = TIEMPO_REFRESCO_PANTALLA,
-    //     .func_p = funcTimerInterfaz,
-    //     .param_p = NULL
-    // };
-    // TimerInit(&timer_interfaz);
+    // Configuracion de ADC
+	analog_input_config_t analogIn = {
+		.input = CH1,
+		.mode = ADC_SINGLE
+	};
+	AnalogInputInit(&analogIn); 	// Inicializacion ADC
+
+	// Inicialización de timers 
+    timer_config_t timer_controlador = {
+        .timer = TIMER_A,
+        .period = TIEMPO_MEDICION,
+        .func_p = funcTimerControlador,
+        .param_p = NULL
+    };
+    TimerInit(&timer_controlador);
+
+    /*timer_config_t timer_interfaz = {
+        .timer = TIMER_B,
+        .period = TIEMPO_REFRESCO_PANTALLA,
+        .func_p = funcTimerInterfaz,
+        .param_p = NULL
+    };
+    TimerInit(&timer_interfaz);*/
 
     // Creacion de tareas
-    //xTaskCreate(&controlar, "Controlador", 2048, NULL, 5, &controlador_task_handle);
+    xTaskCreate(&controlar, "Controlador", 4096, NULL, 5, &controlador_task_handle);
     //xTaskCreate(&manejarInterfaz, "Interfaz", 512, NULL, 5, &interfaz_task_handle);
 
-    // xTaskCreate(&manejoDeLEDsyBuzzers, "manejoDeLEDsyBuzzers", 512, NULL, 5, &interfaz_task_handle);
 
-
-    //GPIOActivInt(GPIO_IR, *cambioEstado_IR, false, NULL); //lanza el evento de que el IR midio
+	// Inicializacion de UART
+    serial_config_t uart = {
+        .port = UART_PC,
+        .baud_rate = 9600,
+        .func_p = NULL,
+        .param_p = NULL
+    };
+    UartInit(&uart);
 
     // Inicio de los timers
-    // TimerStart(timer_interfaz.timer);
-    //TimerStart(timer_controlador.timer);
-serial_config_t my_uart = {
-    .port = UART_PC,
-    .baud_rate = 57600,
-    .func_p = NULL,
-    .param_p = NULL
-    };
-    UartInit(&my_uart);
+    //TimerStart(timer_interfaz.timer);
+    TimerStart(timer_controlador.timer);
 
-    while (1){
-    AnalogInputReadSingle(GPIO_IR, &voltaje);   //se obtiene el voltaje en el sensor 
-    printf("%d\n", voltaje);
-    AnalogInputReadSingle(GPIO_IR, &voltaje);
-	UartSendString(UART_PC, (char*)UartItoa(voltaje, 10));
-	UartSendString(UART_PC, "\r\n");
-    vTaskDelay(1000 / portTICK_PERIOD_MS);
-    }
+    // while (1){
+
+    // vTaskDelay(1000 / portTICK_PERIOD_MS);
+    // }
 }
 /*==================[end of file]============================================*/
