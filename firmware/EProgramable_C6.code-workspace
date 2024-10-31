@@ -97,7 +97,9 @@
             "rtc_mcu.h": "c",
             "fft.h": "c",
             "i2c.h": "c",
-            "buzzer.h": "c"
+            "buzzer.h": "c",
+            "esp_bt.h": "c",
+            "esp_gap_ble_api.h": "c"
         },
     },
     "tasks": {
