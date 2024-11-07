@@ -1,23 +1,17 @@
-/*! @mainpage Ejemplo Bluetooth - Filter
+/*! @mainpage Ejemplo Bluetooth - FFT
  *
  * @section genDesc General Description
  *
- * This section describes how the program works.
- *
- * <a href="https://drive.google.com/...">Operation Example</a>
- *
- * @section hardConn Hardware Connection
- *
- * |    Peripheral  |   ESP32   	|
- * |:--------------:|:--------------|
- * | 	PIN_X	 	| 	GPIO_X		|
- *
+ * Este proyecto ejemplifica el uso del módulo de comunicación 
+ * Bluetooth Low Energy (BLE), junto con el de cálculo de la FFT 
+ * de una señal.
+ * Permite graficar en una aplicación móvil la FFT de una señal. 
  *
  * @section changelog Changelog
  *
  * |   Date	    | Description                                    |
  * |:----------:|:-----------------------------------------------|
- * | 12/09/2023 | Document creation		                         |
+ * | 02/04/2024 | Document creation		                         |
  *
  * @author Albano Peñalva (albano.penalva@uner.edu.ar)
  *
@@ -27,132 +21,280 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <string.h>
-
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-
 #include "led.h"
 #include "neopixel_stripe.h"
 #include "ble_mcu.h"
+#include "delay_mcu.h"
+#include <stdio.h>
+#include <stdint.h>
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "led.h"
+#include "hc_sr04.h"
+#include "lcditse0803.h"
+#include "switch.h"
 #include "timer_mcu.h"
-
-#include "iir_filter.h"
+#include "uart_mcu.h"
+#include "stdlib.h"
+#include "neopixel_stripe.h"
+//#include "buzzer.h"
+//#include "buzzer_melodies.h"
+#include "time.h"
+#include "stdio.h"
+#include "analog_io_mcu.h"
+#include "uart_mcu.h"
 /*==================[macros and definitions]=================================*/
-#define CONFIG_BLINK_PERIOD 500
-#define LED_BT	            LED_1
-#define BUFFER_SIZE         256
-#define SAMPLE_FREQ	        200
-#define T_SENIAL            4000 
-#define CHUNK               4 
+
+#define TIEMPO_REFRESCO_PANTALLA 1 // VER TIEMPOS
+#define TIEMPO_MEDICION 1000 // antes estaba en 100000
+#define GPIO_LEDS GPIO_9
+#define GPIO_IR GPIO_22
+#define SENSORR  785  // 0.78 V
+#define SENSORN  2353 // 2.35
+#define SENSORV  2753 // 2.75
+#define SENSORA  1360 // 1.36
+#define CANTIDADSENSORES 4
+#define LED_BT LED_2
+
 /*==================[internal data definition]===============================*/
-float ecg[] = {
-     76,  76,  77,  77,  76,  83,  85,  78,  76,  85,  93,  85,  79,
-     86,  93,  93,  85,  87,  94,  98,  93,  87,  95, 104,  99,  91,
-     93, 102, 104,  99,  96, 101, 106, 102,  96,  97, 104, 106,  97,
-     94, 100, 103, 101,  91,  95, 103, 100,  94,  90,  98, 104,  94,
-     87,  93,  99,  97,  87,  86,  96,  98,  90,  83,  90,  96,  89,
-     81,  80,  87,  92,  82,  78,  84,  89,  80,  72,  78,  82,  82,
-     73,  72,  81,  82,  79,  69,  77,  82,  81,  76,  68,  78,  80,
-     76,  73,  78,  82,  82,  75,  72,  86,  84,  78,  76,  85,  95,
-     88,  81,  83,  93,  90,  86,  83,  88,  93,  86,  82,  82,  92,
-     89,  82,  82,  88,  94,  84,  82,  90,  98,  94,  87,  91,  95,
-     98,  93,  90,  97, 104, 105,  96,  93, 107, 116, 118, 127, 148,
-    181, 208, 231, 252, 241, 198, 139,  76,  43,  32,  29,  42,  65,
-     86,  90,  88,  93, 101, 107, 102,  98, 103, 110, 104,  98,  99,
-    107, 109,  96,  95, 103, 107, 102,  95,  95, 102, 105,  94,  94,
-    102, 102,  99,  94,  96, 102,  99,  90,  92, 100, 102,  95,  90,
-     98, 104,  97,  89,  94, 102, 103,  97,  93, 100, 105, 102,  93,
-     97, 104, 104, 100,  96, 108, 111, 104,  99, 101, 108, 102,  96,
-     97, 104, 104,  97,  89,  91, 100,  91,  81,  79,  85,  86,  73,
-     69,  75,  79,  75,  68,  68,  76,  76,  69,  67,  74,  81,  77,
-     71,  72,  82,  82,  76,  77,  76,  76,  75
-};
-static float ecg_filt[CHUNK];
-TaskHandle_t fft_task_handle = NULL;
-bool filter = false;
+
+TaskHandle_t interfaz_task_handle = NULL;
+TaskHandle_t controlador_task_handle = NULL;
+bool IR = false;    //analiza si se dispara el evento
+uint16_t voltaje = 0; //voltaje asociado al sensor que se midio
+bool medidaAcertada = false;     // Inidca si el sensor seleccionado fue el correcto
+bool medidaIncorrecta = false;
+neopixel_color_t cantidadLeds [CANTIDADSENSORES*4];     // Cantidad de LEDs
+clock_t tiempoInicio = 0;   // Tiempo 0 en que se prende el sensor
+clock_t tiempoFinal = 0;    // Tiempo final en el que se selecciona el sensor correcto
+u_int16_t tiempoMedido = 0; // TimepoFinal - TiempInicio
+int sensor = -1;
+u_int16_t sensorPrendido = 0;   
+int sensor_anterior = -1;
+bool inicio = true;
+uint8_t vida;
+uint8_t progreso;
+
 /*==================[internal functions declaration]=========================*/
-void read_data(uint8_t * data, uint8_t length){
-    switch(data[0]){
-        case 'A':
-            filter = true;
-            break;
-        case 'a':
-            filter = false;
-            break;
+
+void funcTimerInterfaz(){
+    vTaskNotifyGiveFromISR(interfaz_task_handle, pdFALSE);
+}
+
+void funcTimerControlador(){
+    vTaskNotifyGiveFromISR(controlador_task_handle, pdFALSE);
+}
+
+void setBarras(){   // Actualiza las barras a las condiciones de inicio
+    char msg[10];
+    sprintf(msg, "*P%d", 0); // Actualiza la barra de progreso
+    //BleSendString(msg);
+
+    printf(msg, "*V%d", 100);     // Actualiza la barra de vida
+    //BleSendString(msg);
+}
+
+void read_data(uint8_t * data, uint8_t length){  
+    if(data[0] == 'G'){ // Interrupcion del boton de inicio
+        inicio = true;
+        setBarras();
+        progreso = 0;
+        vida = 100;
+    }
+
+    if(data[0] == 'R'){ // Interrupcion del boton de stop
+        inicio = false;
     }
 }
 
-void FuncTimerSenial(void* param){
-    xTaskNotifyGive(fft_task_handle);
+static void manejoDeLEDsyBuzzers(){
+    
+    while (sensor == sensor_anterior){
+        sensor = rand() % (CANTIDADSENSORES); //Obtengo el sensor a encender
+    }
+
+    for(int i = sensor*4; i<(sensor*4+4); i++){
+        if(sensor==0){
+            NeoPixelSetPixel(i, NEOPIXEL_COLOR_RED); // prende sensor en un color
+        }
+        if(sensor==1){
+            NeoPixelSetPixel(i, NEOPIXEL_COLOR_BLUE); 
+        }
+        if(sensor==2){
+            NeoPixelSetPixel(i, NEOPIXEL_COLOR_GREEN);
+        }
+        if(sensor==3){
+            NeoPixelSetPixel(i, NEOPIXEL_COLOR_ORANGE);
+        }
+    }
+    sensor_anterior = sensor;
+    //BuzzerOn(); // prendo el buzzer
 }
 
-static void FftTask(void *pvParameter){
-    char msg[128];
-    char msg_chunk[24];
-    static uint8_t indice = 0;
-    while(true){
-        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-        if(filter){
-            HiPassFilter(&ecg[indice], ecg_filt, CHUNK);
-            LowPassFilter(ecg_filt, ecg_filt, CHUNK);
-        } else{
-            memcpy(ecg_filt, &ecg[indice], CHUNK*sizeof(float));
-        }
-        strcpy(msg, "");
-        for(uint8_t i=0; i<CHUNK; i++){
-            sprintf(msg_chunk, "*G%.2f*", ecg_filt[i]);
-            strcat(msg, msg_chunk);
-        }
-        indice += CHUNK;
 
-        BleSendString(msg);
+static void activar_IR(){
+    IR = true;
+    LedOff(LED_1);
+}
+
+void obtenerSensorPrendido(){    //Asigna la tension del bloque activado a la variable sensorPrendido
+    switch (sensor){
+        case 0: sensorPrendido = SENSORR; break;
+        case 1: sensorPrendido = SENSORA; break;
+        case 2: sensorPrendido = SENSORV; break;
+        case 3: sensorPrendido = SENSORN; break;
+    }
+    //printf("Tension del sensor prendido: %d\r\n",sensorPrendido);
+}
+
+void apagarLeds(){
+    for(int i = 0 ; i<CANTIDADSENSORES*4; i++){
+        cantidadLeds[i]=0;
     }
 }
-/*==================[external functions definition]==========================*/
-void app_main(void){
-    uint8_t blink = 0;
-    static neopixel_color_t color;
-    ble_config_t ble_configuration = {
-        "ESP_EDU_1",
-        read_data
-    };
-    timer_config_t timer_senial = {
-        .timer = TIMER_B,
-        .period = T_SENIAL*CHUNK,
-        .func_p = FuncTimerSenial,
-        .param_p = NULL
-    };
 
-    NeoPixelInit(BUILT_IN_RGB_LED_PIN, BUILT_IN_RGB_LED_LENGTH, &color);
-    NeoPixelAllOff();
-    TimerInit(&timer_senial);
-    LedsInit();  
-    LowPassInit(SAMPLE_FREQ, 30, ORDER_2);
-    HiPassInit(SAMPLE_FREQ, 1, ORDER_2);
-    BleInit(&ble_configuration);
+static void medir_tiempo(){
+    tiempoMedido = ((u_int16_t)(tiempoInicio - tiempoFinal)) / CLOCKS_PER_SEC; //calcula el tiempo
+}
 
-    xTaskCreate(&FftTask, "FFT", 4096, NULL, 5, &fft_task_handle);
-    TimerStart(timer_senial.timer);
+static void manejarInterfaz(void *pvParameter){
+    setBarras();
+    printf("Progreso: %d º/.\r\n", progreso);
+    printf("Vida: %d º/.\r\n", vida);
 
     while(1){
-        vTaskDelay(CONFIG_BLINK_PERIOD / portTICK_PERIOD_MS);
-        switch(BleStatus()){
-            case BLE_OFF:
-                NeoPixelAllOff();
-            break;
-            case BLE_DISCONNECTED:
-                if(blink%2){
-                    NeoPixelAllColor(NEOPIXEL_COLOR_BLUE);
-                }else{
-                    NeoPixelAllOff();
-                }
-                blink++;
-            break;
-            case BLE_CONNECTED:
-                NeoPixelAllColor(NEOPIXEL_COLOR_BLUE);
-            break;
+		ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+
+        if (medidaAcertada){
+            char msg[10];
+            progreso = progreso + 10;
+            printf("Progreso: %d º/.\r\n", progreso);
+            sprintf(msg, "*P%d", progreso); // Actualiza la barra de progreso
+            //BleSendString(msg);
+        }
+
+        if (medidaIncorrecta){
+            char msg[10];
+            vida = vida - 25;   
+            printf("Vida: %d º/.\r\n", vida);
+            sprintf(msg, "*V%d", vida);     // Actualiza la barra de vida
+            //BleSendString(msg);
+        }
+	}
+}
+
+static void controlar(void *pvParameter){
+    xTaskNotifyGive(interfaz_task_handle);
+
+    manejoDeLEDsyBuzzers();
+    obtenerSensorPrendido();
+    tiempoInicio = clock(); //Inicia el tiempo
+
+    while(1){
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+
+        if (IR == true){    // Si selecciona algun sensor
+
+            AnalogInputReadSingle(CH1, &voltaje);   //se obtiene el voltaje asociado al sensor seleccionado
+            //printf("%d\n",voltaje);
+
+            if(voltaje > (sensorPrendido-100) && voltaje < (sensorPrendido+100)){  // Si (...): el sensor elegido es correcto
+                medidaAcertada = true;
+                tiempoFinal = clock(); //obtiene el tiempo final
+                medir_tiempo(); //obtiene la diferencia de tiempos
+                LedOn(LED_1);
+                apagarLeds();
+                //BuzzerOff(); //Apago el BUZZER
+                printf("Tiempo medido: %d\r\n", tiempoMedido);
+
+                xTaskNotifyGive(interfaz_task_handle);
+            }
+
+            else{
+                medidaIncorrecta = true;
+
+                xTaskNotifyGive(interfaz_task_handle);
+            }
+
+            IR = false;  //cambia el estado del infrarojo
+        }
+
+        if(medidaAcertada == true){ // Si selecciona el sensor correcto cambia a otro sensor
+            manejoDeLEDsyBuzzers();
+            obtenerSensorPrendido();
+            tiempoInicio = clock(); //Incia el tiempo 
+
+            medidaAcertada = false;
         }
     }
 }
 
+
+
+/*==================[external functions definition]==========================*/
+void app_main(void){
+    
+    // Inicializacion de los perifericos
+    NeoPixelInit(GPIO_LEDS, CANTIDADSENSORES*4, cantidadLeds);
+    GPIOActivInt(GPIO_IR, *activar_IR, true, NULL); //lanza el evento de que el IR midio
+    //BuzzerInit(GPIO_IR);
+    //BuzzerSetFrec(NOTE_C3); // se setea el tono con el que suena el buzzer
+
+    // Configuracion e inicializacion de ADC
+	analog_input_config_t analogIn = {
+		.input = CH1,
+		.mode = ADC_SINGLE
+	}; AnalogInputInit(&analogIn); 	
+
+	// Inicialización y configuracion de timers 
+    timer_config_t timer_controlador = {
+        .timer = TIMER_A,
+        .period = TIEMPO_MEDICION,
+        .func_p = funcTimerControlador,
+        .param_p = NULL
+    }; TimerInit(&timer_controlador);
+
+    /*
+    timer_config_t timer_interfaz = {
+        .timer = TIMER_B,
+        .period = TIEMPO_REFRESCO_PANTALLA,
+        .func_p = funcTimerInterfaz,
+        .param_p = NULL
+    }; TimerInit(&timer_interfaz);
+    */
+
+    // Creacion de tareas
+    xTaskCreate(&controlar, "Controlador", 4096, NULL, 5, &controlador_task_handle);
+    xTaskCreate(&manejarInterfaz, "Interfaz", 4096, NULL, 5, &interfaz_task_handle);
+
+    // Inicio de los timers
+    //TimerStart(timer_interfaz.timer);
+    TimerStart(timer_controlador.timer);
+
+/*
+    // Configuracion e inicializacion BT
+    ble_config_t ble_configuration = { // Configuracion del BT
+        "JOAQUIN y LUCAS",    // Nombre del dispositivo
+        read_data       // Función a ejecutarse ante un interrupción de recepción a través de la conexión BLE.
+    }; BleInit(&ble_configuration);    // Inicializa BT
+
+    while(1){       // Chequea el estado del BT para prender un LED segun este conectado, desconectado o apagado
+        vTaskDelay(500 / portTICK_PERIOD_MS);
+        switch(BleStatus()){    
+            case BLE_OFF:
+                LedOff(LED_BT);
+            break;
+            case BLE_DISCONNECTED:
+                LedToggle(LED_BT);
+            break;
+            case BLE_CONNECTED:
+                LedOn(LED_BT);
+            break;
+        }
+    }
+*/
+
+}
 /*==================[end of file]============================================*/
