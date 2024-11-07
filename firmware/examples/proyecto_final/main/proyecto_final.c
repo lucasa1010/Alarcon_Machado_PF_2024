@@ -46,8 +46,8 @@
 /*==================[macros and definitions]=================================*/
 #define TIEMPO_REFRESCO_PANTALLA 1 // VER TIEMPOS
 #define TIEMPO_MEDICION 1000 // 1 ms de refresco 
-#define GPIO_LEDS GPIO_9
-#define GPIO_IR GPIO_22
+#define GPIO_LEDS GPIO_9 // maneja los leds
+#define GPIO_IR GPIO_22 // Lee la tension de los IR
 TaskHandle_t interfaz_task_handle = NULL;
 TaskHandle_t controlador_task_handle = NULL;
 bool IR = false; //analiza si se dispara el evento
@@ -200,12 +200,8 @@ serial_config_t my_uart = {
     UartInit(&my_uart);
 
     while (1){
-    AnalogInputReadSingle(GPIO_IR, &voltaje);   //se obtiene el voltaje en el sensor 
-    printf("%d\n", voltaje);
-    AnalogInputReadSingle(GPIO_IR, &voltaje);
-	UartSendString(UART_PC, (char*)UartItoa(voltaje, 10));
-	UartSendString(UART_PC, "\r\n");
-    vTaskDelay(1000 / portTICK_PERIOD_MS);
+        GPIOActivInt(GPIO_IR, *cambioEstado_IR, false, NULL); //lanza el evento de que el IR midio
+        vTaskDelay(1000 / portTICK_PERIOD_MS);
     }
 }
 /*==================[end of file]============================================*/

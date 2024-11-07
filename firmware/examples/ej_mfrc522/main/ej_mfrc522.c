@@ -35,6 +35,7 @@
 #include "led.h"
 #include "uart_mcu.h"
 #include "rfid_utils.h"
+#include "gpio_mcu.h"
 /*==================[macros and definitions]=================================*/
 #define CONFIG_BLINK_PERIOD 1000
 /*==================[internal data definition]===============================*/
@@ -68,28 +69,21 @@ void userTapIn() {
 
 
 }
+bool IR = false;
+
+void cambioEstado_IR(){
+	IR =! IR;
+}
+
 /*==================[external functions definition]==========================*/
 void app_main(void){
 	
-	LedsInit();
-	serial_config_t UART_USB;
-	UART_USB.baud_rate = 115200;
-	UART_USB.port = UART_PC;
-	UartInit(&UART_USB);
-	setupRFID(&mfrcInstance);
+	GPIOInit(GPIO_22, 0); // IN 0 OUT 1
+	GPIOActivInt(GPIO_22, *cambioEstado_IR, false, NULL);
 
-	UartSendString(UART_PC,"Init MRFC522 test.\r\n");
-	
-    while(true){
-		UartSendString(UART_PC,"Reading... \r\n");
-		if (PICC_IsNewCardPresent(mfrcInstance)) {
-			if (PICC_ReadCardSerial(mfrcInstance)) {
-				LedOn(LED_1);
-				userTapIn();
-				LedOff(LED_1);
-			}
-		}
-		vTaskDelay(CONFIG_BLINK_PERIOD / portTICK_PERIOD_MS);
+	while(1){
+		printf("&d/r/n", IR);
+		vTaskDelay(1000 / portTICK_PERIOD_MS);
 	}
 }
 /*==================[end of file]============================================*/
