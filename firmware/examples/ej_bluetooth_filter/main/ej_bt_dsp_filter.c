@@ -90,10 +90,10 @@ void funcTimerControlador(){
 void setBarras(){   // Actualiza las barras a las condiciones de inicio
     char msg[10];
     sprintf(msg, "*P%d", 0); // Actualiza la barra de progreso
-    BleSendString(msg);
+    //BleSendString(msg);
 
     printf(msg, "*V%d", 100);     // Actualiza la barra de vida
-    BleSendString(msg);
+    //BleSendString(msg);
 }
 
 void read_data(uint8_t * data, uint8_t length){  
@@ -146,7 +146,7 @@ void obtenerSensorPrendido(){    //Asigna la tension del bloque activado a la va
         case 2: sensorPrendido = SENSORV; break;
         case 3: sensorPrendido = SENSORN; break;
     }
-    printf("Tension del sensor prendido: %d\r\n",sensorPrendido);
+    //printf("Tension del sensor prendido: %d\r\n",sensorPrendido);
 }
 
 void apagarLeds(){
@@ -161,6 +161,8 @@ static void medir_tiempo(){
 
 static void manejarInterfaz(void *pvParameter){
     setBarras();
+    printf("Progreso: %d º/.\r\n", progreso);
+    printf("Vida: %d º/.\r\n", vida);
 
     while(1){
 		ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
@@ -168,15 +170,17 @@ static void manejarInterfaz(void *pvParameter){
         if (medidaAcertada){
             char msg[10];
             progreso = progreso + 10;
+            printf("Progreso: %d º/.\r\n", progreso);
             sprintf(msg, "*P%d", progreso); // Actualiza la barra de progreso
-            BleSendString(msg);
+            //BleSendString(msg);
         }
 
         if (medidaIncorrecta){
             char msg[10];
             vida = vida - 25;   
+            printf("Vida: %d º/.\r\n", vida);
             sprintf(msg, "*V%d", vida);     // Actualiza la barra de vida
-            BleSendString(msg);
+            //BleSendString(msg);
         }
 	}
 }
@@ -194,7 +198,7 @@ static void controlar(void *pvParameter){
         if (IR == true){    // Si selecciona algun sensor
 
             AnalogInputReadSingle(CH1, &voltaje);   //se obtiene el voltaje asociado al sensor seleccionado
-            printf("%d\n",voltaje);
+            //printf("%d\n",voltaje);
 
             if(voltaje > (sensorPrendido-100) && voltaje < (sensorPrendido+100)){  // Si (...): el sensor elegido es correcto
                 medidaAcertada = true;
