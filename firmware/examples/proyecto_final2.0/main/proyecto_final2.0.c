@@ -63,7 +63,7 @@ bool medidaAcertada = true;
 neopixel_color_t cantidadLeds [CANTIDADSENSORES*4];
 clock_t tiempoInicio = 0;
 clock_t tiempoFinal = 0;
-u_int16_t tiempoMedido = 0;
+float tiempoMedido = 0;
 int sensor = -1;
 u_int16_t sensorPrendido = 0;
 int sensor_anterior = -1;
@@ -104,8 +104,7 @@ static void manejoDeLEDsyBuzzers(){
 
 
 static void cambioEstado_IR(){
-    IR =! IR;
-    LedOff(LED_1);
+    IR = true;
 }
 
 void obtenerSensorPrendido(){    //Asigna la tension del bloque activado a la variable sensorPrendido
@@ -115,17 +114,20 @@ void obtenerSensorPrendido(){    //Asigna la tension del bloque activado a la va
         case 2: sensorPrendido = SENSORV; break;
         case 3: sensorPrendido = SENSORN; break;
     }
-    printf("Tension del sensor prendido: %d\r\n",sensorPrendido);
+    //printf("Tension del sensor prendido: %d\r\n",sensorPrendido);
+    tiempoInicio = clock(); //Incia el tiempo
 }
 
 void apagarLeds(){
-    for(int i = 0 ; i<CANTIDADSENSORES*4; i++){
-        cantidadLeds[i]=0;
-    }
+    // for(int i = 0 ; i<CANTIDADSENSORES*4; i++){
+    //     cantidadLeds[i]=0;
+    // }
+    
+    memset(cantidadLeds,0,((size_t)(CANTIDADSENSORES*4))* sizeof(int));
 }
 
-static void medir(){
-    tiempoMedido = ((u_int16_t)(tiempoInicio - tiempoFinal)) / CLOCKS_PER_SEC; //calcula el tiempo
+static void calcularTiempo(){
+    tiempoMedido = (u_int16_t)((tiempoInicio - tiempoFinal)*1000 / CLOCKS_PER_SEC); //calcula el tiempo
 }
 
 static void controlar(void *pvParameter){
@@ -135,31 +137,33 @@ static void controlar(void *pvParameter){
             manejoDeLEDsyBuzzers();
             obtenerSensorPrendido();
             medidaAcertada = false;
-            tiempoInicio = clock(); //Incia el tiempo 
+            LedOn(LED_3);
+            vTaskDelay(500/portTICK_PERIOD_MS);
+            LedOff(LED_3);
         } 
         if (IR == true){ //Asociarlo a niveles de tension
             AnalogInputReadSingle(CH1, &voltaje);   //se obtiene el voltaje en el sensor 
-            printf("%d\n",voltaje);
+            //printf("%d\n",voltaje);
             if(voltaje > (sensorPrendido-100) && voltaje < (sensorPrendido+100)){
                 tiempoFinal = clock(); //obtiene el tiempo final
-                medir(); //obtiene la diferencia de tiempos
+                calcularTiempo(); //obtiene la diferencia de tiempos
                 //cambioEstado_IR(); //cambia el estado del infrarojo
-                LedOn(LED_1);
                 apagarLeds();
                 //BuzzerOff(); //Apago el BUZZER
                 medidaAcertada = true;
-                printf("Tiempo medido: %d\r\n", tiempoMedido);
+                tiempoMedido=tiempoMedido/1000;
+                printf("Tiempo medido: %.2f\r\n", tiempoMedido);
             }
-            cambioEstado_IR(); //cambia el estado del infrarojo
+            IR = false;
         }
     }
 }
 
-static void manejarInterfaz(void *pvParameter){
-    while(1){
-		ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-	}
-}
+// static void manejarInterfaz(void *pvParameter){
+//     while(1){
+// 		ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+// 	}
+// }
 
 /*==================[external functions definition]==========================*/
 void app_main(void){
@@ -167,6 +171,7 @@ void app_main(void){
     // Inicializacion de los perifericos
     NeoPixelInit(GPIO_LEDS, CANTIDADSENSORES*4, cantidadLeds);
     GPIOActivInt(GPIO_IR, *cambioEstado_IR, true, NULL); //lanza el evento de que el IR midio
+    LedsInit();
     //BuzzerInit(GPIO_IR);
     //BuzzerSetFrec(NOTE_C3); // se setea el tono con el que suena el buzzer
 
