@@ -64,12 +64,12 @@ TaskHandle_t interfaz_task_handle = NULL;
 TaskHandle_t controlador_task_handle = NULL;
 bool IR = false;    //analiza si se dispara el evento
 uint16_t voltaje = 0; //voltaje asociado al sensor que se midio
-bool medidaAcertada = false;     // Inidca si el sensor seleccionado fue el correcto
+bool medidaAcertada = true;     // Inidca si el sensor seleccionado fue el correcto
 bool medidaIncorrecta = false;
 neopixel_color_t cantidadLeds [CANTIDADSENSORES*4];     // Cantidad de LEDs
 clock_t tiempoInicio = 0;   // Tiempo 0 en que se prende el sensor
 clock_t tiempoFinal = 0;    // Tiempo final en el que se selecciona el sensor correcto
-u_int16_t tiempoMedido = 0; // TimepoFinal - TiempInicio
+_Float16 tiempoMedido = 0; // TimepoFinal - TiempInicio
 int sensor = -1;
 u_int16_t sensorPrendido = 0;   
 int sensor_anterior = -1;
@@ -156,7 +156,7 @@ void apagarLeds(){
 }
 
 static void medir_tiempo(){
-    tiempoMedido = ((u_int16_t)(tiempoInicio - tiempoFinal)) / CLOCKS_PER_SEC; //calcula el tiempo
+    tiempoMedido = (_Float16)((tiempoInicio - tiempoFinal)*1000 / CLOCKS_PER_SEC); //calcula el tiempo
 }
 
 static void manejarInterfaz(void *pvParameter){
@@ -171,6 +171,7 @@ static void manejarInterfaz(void *pvParameter){
             char msg[10];
             progreso = progreso + 10;
             printf("Progreso: %d º/.\r\n", progreso);
+            printf("Tiempo medido: %d\r\n", (int)tiempoMedido);
             sprintf(msg, "*P%d", progreso); // Actualiza la barra de progreso
             //BleSendString(msg);
         }
@@ -186,11 +187,9 @@ static void manejarInterfaz(void *pvParameter){
 }
 
 static void controlar(void *pvParameter){
-    xTaskNotifyGive(interfaz_task_handle);
+    //xTaskNotifyGive(interfaz_task_handle);
 
-    manejoDeLEDsyBuzzers();
-    obtenerSensorPrendido();
-    tiempoInicio = clock(); //Inicia el tiempo
+    
 
     while(1){
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
@@ -207,7 +206,6 @@ static void controlar(void *pvParameter){
                 LedOn(LED_1);
                 apagarLeds();
                 //BuzzerOff(); //Apago el BUZZER
-                printf("Tiempo medido: %d\r\n", tiempoMedido);
 
                 xTaskNotifyGive(interfaz_task_handle);
             }

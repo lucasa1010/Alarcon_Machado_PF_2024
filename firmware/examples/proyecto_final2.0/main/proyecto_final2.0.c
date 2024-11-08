@@ -39,8 +39,8 @@
 #include "uart_mcu.h"
 #include "stdlib.h"
 #include "neopixel_stripe.h"
-//#include "buzzer.h"
-//#include "buzzer_melodies.h"
+#include "buzzer.h"
+#include "buzzer_melodies.h"
 #include "time.h"
 #include "stdio.h"
 #include "analog_io_mcu.h"
@@ -48,18 +48,22 @@
 /*==================[macros and definitions]=================================*/
 #define TIEMPO_REFRESCO_PANTALLA 1 // VER TIEMPOS
 #define TIEMPO_MEDICION 1000 // antes estaba en 100000
+#define TIEMPO_uS 1000       // cada cuanto cuenta el clock en us
 #define GPIO_LEDS GPIO_9
-#define GPIO_IR GPIO_22
-TaskHandle_t interfaz_task_handle = NULL;
-TaskHandle_t controlador_task_handle = NULL;
-bool IR = false; //analiza si se dispara el evento
-uint16_t voltaje = 0; //voltaje asociado al sensor que se midio
+#define GPIO_IR GPIO_22     // LED de aviso de sensado IR
+#define GPIO_BUZZER GPIO_20
 #define SENSORR  785  // 0.78 V
 #define SENSORN  2353 // 2.35
 #define SENSORV  2753 // 2.75
 #define SENSORA  1360 // 1.36
 #define CANTIDADSENSORES 4
-bool medidaAcertada = true; 
+/*==================[internal data definition]===============================*/
+TaskHandle_t interfaz_task_handle = NULL;
+TaskHandle_t clock_task_handle = NULL;
+TaskHandle_t controlador_task_handle = NULL;
+bool IR = false; //analiza si se dispara el evento
+uint16_t voltaje = 0; //voltaje asociado al sensor que se midio
+bool medidaAcertada = true; // Indica si el sensor seleccionado fue el correcto
 neopixel_color_t cantidadLeds [CANTIDADSENSORES*4];
 clock_t tiempoInicio = 0;
 clock_t tiempoFinal = 0;
@@ -67,15 +71,23 @@ float tiempoMedido = 0;
 int sensor = -1;
 u_int16_t sensorPrendido = 0;
 int sensor_anterior = -1;
-/*==================[internal data definition]===============================*/
-
+uint64_t conteo_en_ms = 0;
+float conteo_en_seg;
+bool pierde = false;
 /*==================[internal functions declaration]=========================*/
-void funcTimerInterfaz(){
-    vTaskNotifyGiveFromISR(interfaz_task_handle, pdFALSE);
-}
+// void funcTimerInterfaz(){
+//     vTaskNotifyGiveFromISR(clock_task_handle, pdFALSE);
+// }
 
 void funcTimerControlador(){
     vTaskNotifyGiveFromISR(controlador_task_handle, pdFALSE);
+}
+
+void funcTimerTiempo(){
+    conteo_en_ms++;
+
+    if (conteo_en_ms > 6000)
+        pierde = true;
 }
 
 static void manejoDeLEDsyBuzzers(){
@@ -85,25 +97,26 @@ static void manejoDeLEDsyBuzzers(){
     }
 
     for(int i = sensor*4; i<(sensor*4+4); i++){
-        if(sensor==0){
+        if(sensor == 0){
             NeoPixelSetPixel(i, NEOPIXEL_COLOR_RED); // prende sensor en un color
         }
-        if(sensor==1){
+        if(sensor == 1){
             NeoPixelSetPixel(i, NEOPIXEL_COLOR_BLUE); 
         }
-        if(sensor==2){
+        if(sensor == 2){
             NeoPixelSetPixel(i, NEOPIXEL_COLOR_GREEN);
         }
-        if(sensor==3){
+        if(sensor == 3){
             NeoPixelSetPixel(i, NEOPIXEL_COLOR_ORANGE);
         }
     }
     sensor_anterior = sensor;
+   
     //BuzzerOn(); // prendo el buzzer
 }
 
 
-static void cambioEstado_IR(){
+static void cambioIRaActivo(){
     IR = true;
 }
 
@@ -114,66 +127,62 @@ void obtenerSensorPrendido(){    //Asigna la tension del bloque activado a la va
         case 2: sensorPrendido = SENSORV; break;
         case 3: sensorPrendido = SENSORN; break;
     }
-    //printf("Tension del sensor prendido: %d\r\n",sensorPrendido);
-    tiempoInicio = clock(); //Incia el tiempo
 }
 
 void apagarLeds(){
-    // for(int i = 0 ; i<CANTIDADSENSORES*4; i++){
-    //     cantidadLeds[i]=0;
-    // }
-    
-    memset(cantidadLeds,0,((size_t)(CANTIDADSENSORES*4))* sizeof(int));
-}
-
-static void calcularTiempo(){
-    tiempoMedido = (u_int16_t)((tiempoInicio - tiempoFinal)*1000 / CLOCKS_PER_SEC); //calcula el tiempo
+    for(int i = 0 ; i<CANTIDADSENSORES*4; i++){
+        cantidadLeds[i]=0;
+    }
 }
 
 static void controlar(void *pvParameter){
     while(1){
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+
+        if (pierde){
+            NeoPixelAllColor(NEOPIXEL_COLOR_RED);
+            GPIOOn(GPIO_BUZZER);
+
+            vTaskDelay(3000 / portTICK_PERIOD_MS);
+
+            GPIOOff(GPIO_BUZZER);
+            apagarLeds();
+            conteo_en_ms = 0;
+            medidaAcertada = true;
+            pierde = false;
+        }
+
         if(medidaAcertada == true){ // Si selecciona el sensor correcto
             manejoDeLEDsyBuzzers();
             obtenerSensorPrendido();
             medidaAcertada = false;
-            LedOn(LED_3);
-            vTaskDelay(500/portTICK_PERIOD_MS);
-            LedOff(LED_3);
-        } 
+        }
+
         if (IR == true){ //Asociarlo a niveles de tension
             AnalogInputReadSingle(CH1, &voltaje);   //se obtiene el voltaje en el sensor 
-            //printf("%d\n",voltaje);
+
             if(voltaje > (sensorPrendido-100) && voltaje < (sensorPrendido+100)){
-                tiempoFinal = clock(); //obtiene el tiempo final
-                calcularTiempo(); //obtiene la diferencia de tiempos
-                //cambioEstado_IR(); //cambia el estado del infrarojo
                 apagarLeds();
-                //BuzzerOff(); //Apago el BUZZER
                 medidaAcertada = true;
-                tiempoMedido=tiempoMedido/1000;
-                printf("Tiempo medido: %.2f\r\n", tiempoMedido);
+                conteo_en_seg= (float)conteo_en_ms/1000;
+                printf("Tiempo medido: %.2f seg\r\n", conteo_en_seg);
+                conteo_en_ms=0;
             }
+
             IR = false;
         }
+
     }
 }
-
-// static void manejarInterfaz(void *pvParameter){
-//     while(1){
-// 		ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-// 	}
-// }
 
 /*==================[external functions definition]==========================*/
 void app_main(void){
     
     // Inicializacion de los perifericos
     NeoPixelInit(GPIO_LEDS, CANTIDADSENSORES*4, cantidadLeds);
-    GPIOActivInt(GPIO_IR, *cambioEstado_IR, true, NULL); //lanza el evento de que el IR midio
+    GPIOActivInt(GPIO_IR, *cambioIRaActivo, true, NULL); //lanza el evento de que el IR midio
     LedsInit();
-    //BuzzerInit(GPIO_IR);
-    //BuzzerSetFrec(NOTE_C3); // se setea el tono con el que suena el buzzer
+    GPIOInit(GPIO_BUZZER, GPIO_OUTPUT);
 
     // Configuracion de ADC
 	analog_input_config_t analogIn = {
@@ -191,6 +200,14 @@ void app_main(void){
     };
     TimerInit(&timer_controlador);
 
+    timer_config_t timer_tiempo = {
+        .timer = TIMER_B,
+        .period = TIEMPO_uS,
+        .func_p = funcTimerTiempo,
+        .param_p = NULL
+    };
+    TimerInit(&timer_tiempo);
+
     /*timer_config_t timer_interfaz = {
         .timer = TIMER_B,
         .period = TIEMPO_REFRESCO_PANTALLA,
@@ -203,23 +220,10 @@ void app_main(void){
     xTaskCreate(&controlar, "Controlador", 4096, NULL, 5, &controlador_task_handle);
     //xTaskCreate(&manejarInterfaz, "Interfaz", 512, NULL, 5, &interfaz_task_handle);
 
-
-	// Inicializacion de UART
-    serial_config_t uart = {
-        .port = UART_PC,
-        .baud_rate = 9600,
-        .func_p = NULL,
-        .param_p = NULL
-    };
-    UartInit(&uart);
-
     // Inicio de los timers
     //TimerStart(timer_interfaz.timer);
     TimerStart(timer_controlador.timer);
+    TimerStart(timer_tiempo.timer);
 
-    // while (1){
-
-    // vTaskDelay(1000 / portTICK_PERIOD_MS);
-    // }
 }
 /*==================[end of file]============================================*/
