@@ -62,7 +62,7 @@
 
 TaskHandle_t interfaz_task_handle = NULL;
 TaskHandle_t controlador_task_handle = NULL;
-bool IR = false;    //analiza si se dispara el evento
+bool deteccionIR = false;    //analiza si se dispara el evento
 uint16_t voltaje = 0; //voltaje asociado al sensor que se midio
 bool medidaAcertada = false;     // Inidca si el sensor seleccionado fue el correcto
 bool medidaIncorrecta = false;
@@ -135,7 +135,7 @@ static void manejoDeLEDsyBuzzers(){
 
 
 static void cambioEstado_IR(){
-    IR =! IR;
+    deteccionIR =! deteccionIR;
     LedOff(LED_1);
 }
 
@@ -191,7 +191,7 @@ static void controlar(void *pvParameter){
     while(1){
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
 
-        if (IR == true){    // Si selecciona algun sensor
+        if (deteccionIR == true){    // Si selecciona algun sensor
 
             AnalogInputReadSingle(CH1, &voltaje);   //se obtiene el voltaje asociado al sensor seleccionado
             printf("%d\n",voltaje);
